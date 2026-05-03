@@ -1,0 +1,1299 @@
+Unten ist eine **konkrete, realistische Anleitung**, wie du Gizmo als ersten lauffähigen Quadruped in Gazebo simulierst.
+
+Ich nehme als Zielplattform:
+
+**Ubuntu 24.04 + ROS 2 Jazzy + Gazebo Harmonic / Gazebo Sim**
+
+Das ist aktuell sinnvoller als Gazebo Classic: Gazebo Classic ist seit Januar 2025 End-of-Life, und ROS 2 Jazzy unterstützt Gazebo Classic nicht mehr offiziell. Für moderne ROS-2-Projekte wird Gazebo Sim mit `ros_gz` und `gz_ros2_control` verwendet. `gz_ros2_control` verbindet dabei die ROS-2-Control-Controller mit den simulierten Gazebo-Gelenken. ([Open Robotics Discourse][1])
+
+---
+
+# 1. Zielbild für Gizmo in der Simulation
+
+Gizmo wird in der ersten Version so modelliert:
+
+| Teil            | Beschreibung                                   |
+| --------------- | ---------------------------------------------- |
+| Körper          | ca. 10 cm lang, 6 cm breit, 4 cm hoch          |
+| Kopf            | ca. 6 cm breit, 4 cm hoch, sitzt oben auf Hals |
+| Gesicht/Display | schwarze Fläche vorne am Kopf                  |
+| Beine           | 4 Beine                                        |
+| Servos          | 2 pro Bein: Hüfte + Knie                       |
+| Gesamt          | 8 Bein-Servos + optional 1 Kopfservo           |
+| Arme            | kleine Deko-Arme, zunächst fix                 |
+| Bewegung        | einfache Krabbelbewegung per Gelenkpositionen  |
+
+Für Gazebo bedeutet das:
+
+```text
+base_link
+├── head / display
+├── left_front_upper_leg
+│   └── left_front_lower_leg
+├── right_front_upper_leg
+│   └── right_front_lower_leg
+├── left_rear_upper_leg
+│   └── left_rear_lower_leg
+└── right_rear_upper_leg
+    └── right_rear_lower_leg
+```
+
+Die acht simulierten Servogelenke heißen:
+
+```text
+left_front_hip_joint
+left_front_knee_joint
+right_front_hip_joint
+right_front_knee_joint
+left_rear_hip_joint
+left_rear_knee_joint
+right_rear_hip_joint
+right_rear_knee_joint
+```
+
+---
+
+# 2. Installation
+
+## 2.1 ROS 2 Jazzy installieren
+
+Auf Ubuntu 24.04:
+
+```bash
+sudo apt update
+sudo apt install software-properties-common curl gnupg lsb-release
+sudo add-apt-repository universe
+sudo apt update
+sudo apt install ros-jazzy-desktop
+```
+
+Dann ROS 2 in der Shell aktivieren:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+```
+
+Am besten dauerhaft in `.bashrc` eintragen:
+
+```bash
+echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+source ~/.bashrc
+```
+
+---
+
+## 2.2 Gazebo-ROS-Integration und ros2_control installieren
+
+Gazebo kann über ROS-2-Launch-Dateien gestartet werden; `ros_gz_sim` stellt dafür unter anderem `gz_sim.launch.py` bereit. ([gazebosim.org][2])
+
+Installiere die wichtigen Pakete:
+
+```bash
+sudo apt update
+sudo apt install \
+  ros-jazzy-ros-gz \
+  ros-jazzy-ros-gz-sim \
+  ros-jazzy-ros-gz-bridge \
+  ros-jazzy-robot-state-publisher \
+  ros-jazzy-joint-state-publisher-gui \
+  ros-jazzy-xacro \
+  ros-jazzy-ros2-control \
+  ros-jazzy-ros2-controllers \
+  ros-jazzy-gz-ros2-control
+```
+
+Test:
+
+```bash
+gz sim shapes.sdf
+```
+
+Wenn Gazebo startet, passt die Basis.
+
+---
+
+# 3. Workspace anlegen
+
+```bash
+mkdir -p ~/gizmo_ws/src
+cd ~/gizmo_ws/src
+ros2 pkg create gizmo_description --build-type ament_cmake
+ros2 pkg create gizmo_control --build-type ament_python --dependencies rclpy trajectory_msgs
+```
+
+Danach sollte die Struktur ungefähr so aussehen:
+
+```text
+gizmo_ws/
+└── src/
+    ├── gizmo_description/
+    └── gizmo_control/
+```
+
+---
+
+# 4. Ordnerstruktur für das Modell
+
+```bash
+cd ~/gizmo_ws/src/gizmo_description
+mkdir -p urdf launch config worlds meshes
+```
+
+Am Ende wollen wir:
+
+```text
+gizmo_description/
+├── urdf/
+│   └── gizmo.urdf.xacro
+├── config/
+│   └── gizmo_controllers.yaml
+├── launch/
+│   └── gazebo.launch.py
+├── worlds/
+│   └── empty.world
+└── CMakeLists.txt
+```
+
+---
+
+# 5. URDF/Xacro-Modell für Gizmo
+
+Erstelle:
+
+```bash
+nano ~/gizmo_ws/src/gizmo_description/urdf/gizmo.urdf.xacro
+```
+
+Und füge folgendes ein:
+
+```xml
+<?xml version="1.0"?>
+<robot name="gizmo" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ========================================================= -->
+  <!-- Basic properties                                          -->
+  <!-- ========================================================= -->
+
+  <xacro:property name="body_length" value="0.10"/>
+  <xacro:property name="body_width"  value="0.06"/>
+  <xacro:property name="body_height" value="0.04"/>
+
+  <xacro:property name="upper_leg_length" value="0.05"/>
+  <xacro:property name="lower_leg_length" value="0.05"/>
+  <xacro:property name="leg_thickness" value="0.012"/>
+
+  <xacro:property name="head_width"  value="0.06"/>
+  <xacro:property name="head_depth"  value="0.025"/>
+  <xacro:property name="head_height" value="0.04"/>
+
+  <xacro:property name="mass_body" value="0.35"/>
+  <xacro:property name="mass_leg"  value="0.03"/>
+  <xacro:property name="mass_head" value="0.08"/>
+
+  <!-- ========================================================= -->
+  <!-- Helper: simple box inertia                                -->
+  <!-- ========================================================= -->
+
+  <xacro:macro name="box_inertia" params="mass x y z">
+    <inertial>
+      <mass value="${mass}"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia
+        ixx="${mass/12.0 * (y*y + z*z)}"
+        ixy="0"
+        ixz="0"
+        iyy="${mass/12.0 * (x*x + z*z)}"
+        iyz="0"
+        izz="${mass/12.0 * (x*x + y*y)}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- ========================================================= -->
+  <!-- Materials                                                 -->
+  <!-- ========================================================= -->
+
+  <material name="body_blue">
+    <color rgba="0.1 0.35 0.9 1.0"/>
+  </material>
+
+  <material name="leg_dark">
+    <color rgba="0.08 0.08 0.08 1.0"/>
+  </material>
+
+  <material name="screen_black">
+    <color rgba="0.0 0.0 0.0 1.0"/>
+  </material>
+
+  <material name="eye_green">
+    <color rgba="0.0 1.0 0.3 1.0"/>
+  </material>
+
+  <!-- ========================================================= -->
+  <!-- Base body                                                 -->
+  <!-- ========================================================= -->
+
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0.06" rpy="0 0 0"/>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+      <material name="body_blue"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0.06" rpy="0 0 0"/>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+    </collision>
+
+    <xacro:box_inertia mass="${mass_body}" x="${body_length}" y="${body_width}" z="${body_height}"/>
+  </link>
+
+  <!-- ========================================================= -->
+  <!-- Neck and head                                             -->
+  <!-- ========================================================= -->
+
+  <link name="neck_link">
+    <visual>
+      <origin xyz="0 0 0.095" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.008" length="0.025"/>
+      </geometry>
+      <material name="leg_dark"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0.095" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.008" length="0.025"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="0.01"/>
+      <origin xyz="0 0 0.095"/>
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001"/>
+    </inertial>
+  </link>
+
+  <joint name="neck_fixed_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="neck_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="head_link">
+    <visual>
+      <origin xyz="0.0 0 0.125" rpy="0 0 0"/>
+      <geometry>
+        <box size="${head_depth} ${head_width} ${head_height}"/>
+      </geometry>
+      <material name="body_blue"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0.0 0 0.125" rpy="0 0 0"/>
+      <geometry>
+        <box size="${head_depth} ${head_width} ${head_height}"/>
+      </geometry>
+    </collision>
+
+    <xacro:box_inertia mass="${mass_head}" x="${head_depth}" y="${head_width}" z="${head_height}"/>
+  </link>
+
+  <joint name="head_yaw_joint" type="revolute">
+    <parent link="neck_link"/>
+    <child link="head_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-0.6" upper="0.6" effort="0.3" velocity="1.5"/>
+    <dynamics damping="0.05" friction="0.01"/>
+  </joint>
+
+  <!-- Display panel on front of head -->
+  <link name="display_link">
+    <visual>
+      <origin xyz="0.014 0 0.125" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.002 0.048 0.027"/>
+      </geometry>
+      <material name="screen_black"/>
+    </visual>
+
+    <collision>
+      <origin xyz="0.014 0 0.125" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.002 0.048 0.027"/>
+      </geometry>
+    </collision>
+
+    <inertial>
+      <mass value="0.005"/>
+      <origin xyz="0.014 0 0.125"/>
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001"/>
+    </inertial>
+  </link>
+
+  <joint name="display_fixed_joint" type="fixed">
+    <parent link="head_link"/>
+    <child link="display_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Simple eyes -->
+  <link name="left_eye_link">
+    <visual>
+      <origin xyz="0.016 0.012 0.13" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.004"/>
+      </geometry>
+      <material name="eye_green"/>
+    </visual>
+    <inertial>
+      <mass value="0.001"/>
+      <origin xyz="0.016 0.012 0.13"/>
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001"/>
+    </inertial>
+  </link>
+
+  <joint name="left_eye_fixed_joint" type="fixed">
+    <parent link="head_link"/>
+    <child link="left_eye_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="right_eye_link">
+    <visual>
+      <origin xyz="0.016 -0.012 0.13" rpy="0 0 0"/>
+      <geometry>
+        <sphere radius="0.004"/>
+      </geometry>
+      <material name="eye_green"/>
+    </visual>
+    <inertial>
+      <mass value="0.001"/>
+      <origin xyz="0.016 -0.012 0.13"/>
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001"/>
+    </inertial>
+  </link>
+
+  <joint name="right_eye_fixed_joint" type="fixed">
+    <parent link="head_link"/>
+    <child link="right_eye_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ========================================================= -->
+  <!-- Leg macro                                                 -->
+  <!-- ========================================================= -->
+
+  <xacro:macro name="leg" params="prefix x y">
+
+    <link name="${prefix}_upper_leg">
+      <visual>
+        <origin xyz="0 0 ${-upper_leg_length/2}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${leg_thickness} ${leg_thickness} ${upper_leg_length}"/>
+        </geometry>
+        <material name="leg_dark"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 ${-upper_leg_length/2}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${leg_thickness} ${leg_thickness} ${upper_leg_length}"/>
+        </geometry>
+      </collision>
+
+      <xacro:box_inertia mass="${mass_leg}" x="${leg_thickness}" y="${leg_thickness}" z="${upper_leg_length}"/>
+    </link>
+
+    <joint name="${prefix}_hip_joint" type="revolute">
+      <parent link="base_link"/>
+      <child link="${prefix}_upper_leg"/>
+      <origin xyz="${x} ${y} 0.05" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="-0.8" upper="0.8" effort="0.6" velocity="2.0"/>
+      <dynamics damping="0.05" friction="0.02"/>
+    </joint>
+
+    <link name="${prefix}_lower_leg">
+      <visual>
+        <origin xyz="0 0 ${-lower_leg_length/2}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${leg_thickness} ${leg_thickness} ${lower_leg_length}"/>
+        </geometry>
+        <material name="leg_dark"/>
+      </visual>
+
+      <collision>
+        <origin xyz="0 0 ${-lower_leg_length/2}" rpy="0 0 0"/>
+        <geometry>
+          <box size="${leg_thickness} ${leg_thickness} ${lower_leg_length}"/>
+        </geometry>
+      </collision>
+
+      <xacro:box_inertia mass="${mass_leg}" x="${leg_thickness}" y="${leg_thickness}" z="${lower_leg_length}"/>
+    </link>
+
+    <joint name="${prefix}_knee_joint" type="revolute">
+      <parent link="${prefix}_upper_leg"/>
+      <child link="${prefix}_lower_leg"/>
+      <origin xyz="0 0 ${-upper_leg_length}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="-1.2" upper="1.2" effort="0.6" velocity="2.0"/>
+      <dynamics damping="0.05" friction="0.02"/>
+    </joint>
+
+  </xacro:macro>
+
+  <!-- Four legs: x vorne/hinten, y links/rechts -->
+  <xacro:leg prefix="left_front"  x="0.035"  y="0.035"/>
+  <xacro:leg prefix="right_front" x="0.035"  y="-0.035"/>
+  <xacro:leg prefix="left_rear"   x="-0.035" y="0.035"/>
+  <xacro:leg prefix="right_rear"  x="-0.035" y="-0.035"/>
+
+  <!-- ========================================================= -->
+  <!-- ros2_control                                              -->
+  <!-- ========================================================= -->
+
+  <ros2_control name="GizmoSystem" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+
+    <joint name="left_front_hip_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="left_front_knee_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="right_front_hip_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="right_front_knee_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="left_rear_hip_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="left_rear_knee_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="right_rear_hip_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="right_rear_knee_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+    <joint name="head_yaw_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+
+  </ros2_control>
+
+  <!-- Gazebo ros2_control plugin -->
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(find gizmo_description)/config/gizmo_controllers.yaml</parameters>
+    </plugin>
+  </gazebo>
+
+</robot>
+```
+
+---
+
+# 6. Controller-Konfiguration
+
+Erstelle:
+
+```bash
+nano ~/gizmo_ws/src/gizmo_description/config/gizmo_controllers.yaml
+```
+
+Inhalt:
+
+```yaml
+controller_manager:
+  ros__parameters:
+    update_rate: 100
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    gizmo_joint_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+gizmo_joint_controller:
+  ros__parameters:
+    joints:
+      - left_front_hip_joint
+      - left_front_knee_joint
+      - right_front_hip_joint
+      - right_front_knee_joint
+      - left_rear_hip_joint
+      - left_rear_knee_joint
+      - right_rear_hip_joint
+      - right_rear_knee_joint
+      - head_yaw_joint
+
+    command_interfaces:
+      - position
+
+    state_interfaces:
+      - position
+      - velocity
+
+    allow_partial_joints_goal: true
+```
+
+Der `JointTrajectoryController` ist praktisch, weil du später Bewegungsabläufe als Trajektorien senden kannst. Für echte Servos lässt sich dieses Prinzip später ebenfalls verwenden: Simulation und echte Hardware bekommen dann im Idealfall die gleiche ROS-Schnittstelle.
+
+---
+
+# 7. Gazebo World
+
+Erstelle:
+
+```bash
+nano ~/gizmo_ws/src/gizmo_description/worlds/empty.world
+```
+
+Inhalt:
+
+```xml
+<sdf version="1.9">
+  <world name="gizmo_world">
+    <gravity>0 0 -9.81</gravity>
+
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin
+      filename="gz-sim-physics-system"
+      name="gz::sim::systems::Physics">
+    </plugin>
+
+    <plugin
+      filename="gz-sim-user-commands-system"
+      name="gz::sim::systems::UserCommands">
+    </plugin>
+
+    <plugin
+      filename="gz-sim-scene-broadcaster-system"
+      name="gz::sim::systems::SceneBroadcaster">
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>5 5</size>
+            </plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane>
+              <normal>0 0 1</normal>
+              <size>5 5</size>
+            </plane>
+          </geometry>
+          <material>
+            <ambient>0.6 0.6 0.6 1</ambient>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
+```
+
+---
+
+# 8. Launch-Datei für Gazebo
+
+Erstelle:
+
+```bash
+nano ~/gizmo_ws/src/gizmo_description/launch/gazebo.launch.py
+```
+
+Inhalt:
+
+```python
+import os
+
+from ament_index_python.packages import get_package_share_directory
+
+from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription, TimerAction
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+
+from launch_ros.actions import Node
+
+import xacro
+
+
+def generate_launch_description():
+    pkg_gizmo = get_package_share_directory("gizmo_description")
+    pkg_ros_gz_sim = get_package_share_directory("ros_gz_sim")
+
+    xacro_file = os.path.join(pkg_gizmo, "urdf", "gizmo.urdf.xacro")
+    world_file = os.path.join(pkg_gizmo, "worlds", "empty.world")
+
+    robot_description_config = xacro.process_file(xacro_file)
+    robot_description = robot_description_config.toxml()
+
+    gazebo = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(pkg_ros_gz_sim, "launch", "gz_sim.launch.py")
+        ),
+        launch_arguments={
+            "gz_args": f"-r {world_file}"
+        }.items(),
+    )
+
+    robot_state_publisher = Node(
+        package="robot_state_publisher",
+        executable="robot_state_publisher",
+        output="screen",
+        parameters=[
+            {"robot_description": robot_description},
+            {"use_sim_time": True},
+        ],
+    )
+
+    spawn_robot = Node(
+        package="ros_gz_sim",
+        executable="create",
+        arguments=[
+            "-name", "gizmo",
+            "-topic", "robot_description",
+            "-x", "0",
+            "-y", "0",
+            "-z", "0.12",
+        ],
+        output="screen",
+    )
+
+    load_joint_state_broadcaster = TimerAction(
+        period=3.0,
+        actions=[
+            Node(
+                package="controller_manager",
+                executable="spawner",
+                arguments=["joint_state_broadcaster"],
+                output="screen",
+            )
+        ],
+    )
+
+    load_gizmo_controller = TimerAction(
+        period=4.0,
+        actions=[
+            Node(
+                package="controller_manager",
+                executable="spawner",
+                arguments=["gizmo_joint_controller"],
+                output="screen",
+            )
+        ],
+    )
+
+    return LaunchDescription([
+        gazebo,
+        robot_state_publisher,
+        spawn_robot,
+        load_joint_state_broadcaster,
+        load_gizmo_controller,
+    ])
+```
+
+---
+
+# 9. CMakeLists.txt anpassen
+
+Öffne:
+
+```bash
+nano ~/gizmo_ws/src/gizmo_description/CMakeLists.txt
+```
+
+Ersetze den Inhalt durch:
+
+```cmake
+cmake_minimum_required(VERSION 3.8)
+project(gizmo_description)
+
+find_package(ament_cmake REQUIRED)
+
+install(
+  DIRECTORY urdf launch config worlds meshes
+  DESTINATION share/${PROJECT_NAME}
+)
+
+ament_package()
+```
+
+---
+
+# 10. Build
+
+```bash
+cd ~/gizmo_ws
+colcon build
+source install/setup.bash
+```
+
+Wenn keine Fehler kommen, starte Gizmo:
+
+```bash
+ros2 launch gizmo_description gazebo.launch.py
+```
+
+Du solltest jetzt einen kleinen Roboter mit Körper, Kopf, Display und vier Beinen in Gazebo sehen.
+
+---
+
+# 11. Prüfen, ob die Controller laufen
+
+In einem zweiten Terminal:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+source ~/gizmo_ws/install/setup.bash
+
+ros2 control list_controllers
+```
+
+Erwartung ungefähr:
+
+```text
+joint_state_broadcaster active
+gizmo_joint_controller active
+```
+
+Dann die Gelenke prüfen:
+
+```bash
+ros2 control list_joints
+```
+
+Du solltest die neun steuerbaren Gelenke sehen:
+
+```text
+left_front_hip_joint
+left_front_knee_joint
+right_front_hip_joint
+right_front_knee_joint
+left_rear_hip_joint
+left_rear_knee_joint
+right_rear_hip_joint
+right_rear_knee_joint
+head_yaw_joint
+```
+
+---
+
+# 12. Erster manueller Bewegungstest
+
+Sende eine einfache Position an alle Gelenke:
+
+```bash
+ros2 topic pub /gizmo_joint_controller/joint_trajectory trajectory_msgs/msg/JointTrajectory "{
+  joint_names: [
+    'left_front_hip_joint',
+    'left_front_knee_joint',
+    'right_front_hip_joint',
+    'right_front_knee_joint',
+    'left_rear_hip_joint',
+    'left_rear_knee_joint',
+    'right_rear_hip_joint',
+    'right_rear_knee_joint',
+    'head_yaw_joint'
+  ],
+  points: [
+    {
+      positions: [0.2, 0.5, -0.2, 0.5, -0.2, 0.5, 0.2, 0.5, 0.0],
+      time_from_start: {sec: 1, nanosec: 0}
+    }
+  ]
+}"
+```
+
+Wenn alles passt, bewegen sich die Beine.
+
+---
+
+# 13. Einfacher Gait-Controller für Krabbeln
+
+Jetzt bauen wir einen kleinen Python-Node, der Gizmo periodisch bewegt.
+
+Erstelle im Paket `gizmo_control`:
+
+```bash
+mkdir -p ~/gizmo_ws/src/gizmo_control/gizmo_control
+touch ~/gizmo_ws/src/gizmo_control/gizmo_control/__init__.py
+nano ~/gizmo_ws/src/gizmo_control/gizmo_control/simple_gait.py
+```
+
+Inhalt:
+
+```python
+import math
+
+import rclpy
+from rclpy.node import Node
+
+from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+
+
+class SimpleGaitNode(Node):
+    """
+    Very simple gait generator for Gizmo.
+
+    This is not yet a physically optimal walking algorithm.
+    It is a first movement test:
+    - diagonal legs move together
+    - hip joints swing forward/backward
+    - knee joints bend and stretch
+    """
+
+    def __init__(self):
+        super().__init__("simple_gait_node")
+
+        self.publisher = self.create_publisher(
+            JointTrajectory,
+            "/gizmo_joint_controller/joint_trajectory",
+            10,
+        )
+
+        self.joint_names = [
+            "left_front_hip_joint",
+            "left_front_knee_joint",
+            "right_front_hip_joint",
+            "right_front_knee_joint",
+            "left_rear_hip_joint",
+            "left_rear_knee_joint",
+            "right_rear_hip_joint",
+            "right_rear_knee_joint",
+            "head_yaw_joint",
+        ]
+
+        self.t = 0.0
+        self.timer = self.create_timer(0.1, self.publish_gait)
+
+    def publish_gait(self):
+        self.t += 0.1
+
+        # Gait parameters
+        hip_amp = 0.35
+        knee_base = 0.65
+        knee_amp = 0.25
+        head_amp = 0.25
+
+        phase_a = math.sin(self.t * 2.0)
+        phase_b = math.sin(self.t * 2.0 + math.pi)
+
+        # Diagonal gait:
+        # left_front + right_rear are group A
+        # right_front + left_rear are group B
+        left_front_hip = hip_amp * phase_a
+        left_front_knee = knee_base + knee_amp * max(0.0, phase_a)
+
+        right_rear_hip = hip_amp * phase_a
+        right_rear_knee = knee_base + knee_amp * max(0.0, phase_a)
+
+        right_front_hip = hip_amp * phase_b
+        right_front_knee = knee_base + knee_amp * max(0.0, phase_b)
+
+        left_rear_hip = hip_amp * phase_b
+        left_rear_knee = knee_base + knee_amp * max(0.0, phase_b)
+
+        head_yaw = head_amp * math.sin(self.t)
+
+        positions = [
+            left_front_hip,
+            left_front_knee,
+            right_front_hip,
+            right_front_knee,
+            left_rear_hip,
+            left_rear_knee,
+            right_rear_hip,
+            right_rear_knee,
+            head_yaw,
+        ]
+
+        msg = JointTrajectory()
+        msg.joint_names = self.joint_names
+
+        point = JointTrajectoryPoint()
+        point.positions = positions
+        point.time_from_start.sec = 0
+        point.time_from_start.nanosec = 200_000_000
+
+        msg.points.append(point)
+
+        self.publisher.publish(msg)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = SimpleGaitNode()
+    rclpy.spin(node)
+    node.destroy_node()
+    rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()
+```
+
+---
+
+# 14. `setup.py` für `gizmo_control`
+
+Öffne:
+
+```bash
+nano ~/gizmo_ws/src/gizmo_control/setup.py
+```
+
+Ersetze den Inhalt durch:
+
+```python
+from setuptools import setup
+
+package_name = "gizmo_control"
+
+setup(
+    name=package_name,
+    version="0.0.1",
+    packages=[package_name],
+    data_files=[
+        ("share/ament_index/resource_index/packages", ["resource/" + package_name]),
+        ("share/" + package_name, ["package.xml"]),
+    ],
+    install_requires=["setuptools"],
+    zip_safe=True,
+    maintainer="rudi",
+    maintainer_email="rudi@example.com",
+    description="Simple gait controller for Gizmo robot",
+    license="MIT",
+    tests_require=["pytest"],
+    entry_points={
+        "console_scripts": [
+            "simple_gait = gizmo_control.simple_gait:main",
+        ],
+    },
+)
+```
+
+Dann:
+
+```bash
+cd ~/gizmo_ws
+colcon build
+source install/setup.bash
+```
+
+Simulation starten:
+
+```bash
+ros2 launch gizmo_description gazebo.launch.py
+```
+
+In zweitem Terminal:
+
+```bash
+source ~/gizmo_ws/install/setup.bash
+ros2 run gizmo_control simple_gait
+```
+
+Jetzt sollte Gizmo seine Beine rhythmisch bewegen.
+
+---
+
+# 15. Warum Gizmo am Anfang wahrscheinlich noch nicht perfekt läuft
+
+Das Modell ist absichtlich einfach. Für eine gute Laufbewegung brauchst du später:
+
+| Problem                    | Ursache                             | Verbesserung                              |
+| -------------------------- | ----------------------------------- | ----------------------------------------- |
+| Gizmo rutscht              | einfache Box-Beine, wenig Reibung   | Fuß-Links mit höherer Reibung             |
+| Gizmo kippt                | Schwerpunkt zu hoch / Beine zu dünn | Körper tiefer setzen, Füße breiter machen |
+| Beine zittern              | Controller zu aggressiv             | Damping, Massen und Gelenklimits anpassen |
+| Bewegung wirkt unnatürlich | einfacher Sinus-Gait                | echte Quadruped-Gait-Logik                |
+| keine echten Servowerte    | abstrakte Positionen in Radiant     | Mapping Radiant → Servo-PWM einführen     |
+
+Für den ersten Meilenstein ist das aber gut: Du siehst, ob Gelenke, Achsen, Maße und Controller grundsätzlich funktionieren.
+
+---
+
+# 16. Nächster sinnvoller Ausbau: Füße ergänzen
+
+Aktuell sind die Unterschenkel einfache Stäbe. Besser ist pro Bein ein kleiner Fuß:
+
+```text
+upper_leg
+└── lower_leg
+    └── foot
+```
+
+Der Fuß könnte ca. so sein:
+
+```text
+Länge: 2.5 cm
+Breite: 1.5 cm
+Höhe: 0.5 cm
+```
+
+Das verbessert die Stabilität stark.
+
+---
+
+# 17. Gesichtsausdrücke simulieren
+
+Für die erste Version reicht:
+
+```text
+Display = schwarze Fläche
+Augen = grüne Kugeln
+```
+
+Später gibt es drei sinnvolle Stufen:
+
+## Stufe 1: Statische Gesichtselemente
+
+Du modellierst:
+
+```text
+happy eyes
+wink eye
+smile mouth
+```
+
+als kleine Geometrien im URDF. Das ist einfach, aber nicht dynamisch.
+
+## Stufe 2: Gesicht über ROS Topic
+
+Du definierst ein Topic:
+
+```text
+/gizmo/face_expression
+```
+
+Beispiele:
+
+```json
+{"emotion": "happy"}
+{"emotion": "wink"}
+{"emotion": "sleepy"}
+```
+
+Ein eigener Node entscheidet dann, welche Visualisierung angezeigt wird.
+
+## Stufe 3: Echtes Display später auf Hardware
+
+Auf dem echten Roboter wäre das Display z. B.:
+
+| Bauteil            | Funktion                              |
+| ------------------ | ------------------------------------- |
+| OLED / TFT Display | Gesicht anzeigen                      |
+| Raspberry Pi       | LLM, Sprache, Logik                   |
+| Mikrocontroller    | Servo-Steuerung                       |
+| ROS 2 Node         | sendet Bewegungs- und Gesichtsbefehle |
+
+In Gazebo kannst du das Display zunächst nur symbolisch simulieren.
+
+---
+
+# 18. Gizmo-Softwarearchitektur für später
+
+Später sollte Gizmo so aufgebaut sein:
+
+```text
+Mikrofon
+  ↓
+Speech-to-Text
+  ↓
+Small LLM / Brain
+  ↓
+Action Router
+  ↓
+──────────────────────────────
+↓              ↓             ↓
+Movement       Face          Voice
+Controller     Controller    TTS
+↓              ↓             ↓
+Servos         Display       Speaker
+```
+
+In ROS 2 könnte das so aussehen:
+
+```text
+/gizmo/user_text
+/gizmo/brain/action
+/gizmo/movement_command
+/gizmo/face_expression
+/gizmo/speech_output
+```
+
+Beispiel für eine LLM-Antwort:
+
+```json
+{
+  "action": "move",
+  "movement": "crawl_forward",
+  "duration": 2.0,
+  "emotion": "happy"
+}
+```
+
+Der `Action Router` übersetzt das dann in:
+
+```text
+/gizmo_joint_controller/joint_trajectory
+/gizmo/face_expression
+```
+
+---
+
+# 19. Empfohlene Meilensteine
+
+## Meilenstein 1: Gizmo steht in Gazebo
+
+Ziel:
+
+```text
+ros2 launch gizmo_description gazebo.launch.py
+```
+
+Ergebnis:
+
+Gizmo erscheint mit Körper, Kopf, Display und vier Beinen.
+
+---
+
+## Meilenstein 2: Gelenke bewegen sich
+
+Ziel:
+
+```text
+ros2 topic pub /gizmo_joint_controller/joint_trajectory ...
+```
+
+Ergebnis:
+
+Alle Hüft- und Kniegelenke reagieren.
+
+---
+
+## Meilenstein 3: Einfacher Gait
+
+Ziel:
+
+```text
+ros2 run gizmo_control simple_gait
+```
+
+Ergebnis:
+
+Gizmo bewegt die Beine rhythmisch.
+
+---
+
+## Meilenstein 4: Stabilität verbessern
+
+Aufgaben:
+
+```text
+Füße hinzufügen
+Masse anpassen
+Dämpfung anpassen
+Reibung erhöhen
+Körper tiefer setzen
+```
+
+---
+
+## Meilenstein 5: Gehirn anbinden
+
+Ein Brain-Node erzeugt Aktionen:
+
+```json
+{
+  "action": "move",
+  "movement": "crawl_forward"
+}
+```
+
+Der Movement-Controller führt sie aus.
+
+---
+
+# 20. Wichtigste Designentscheidung
+
+Für Gizmo würde ich **nicht sofort versuchen, perfektes Laufen zu simulieren**.
+
+Ich würde so vorgehen:
+
+```text
+1. Erst URDF sauber aufbauen.
+2. Dann alle Servos einzeln bewegen.
+3. Dann einfachen Gait.
+4. Dann Füße/Stabilität verbessern.
+5. Dann Gesichtsausdrücke.
+6. Dann LLM-Brain.
+7. Dann Hardware-Mapping.
+```
+
+Der entscheidende Vorteil: Wenn später echte Servos dazukommen, kannst du die gleiche Logik wiederverwenden. Gazebo ist dann dein virtuelles Testlabor, und der echte Gizmo bekommt später nur eine andere Hardware-Schicht unter derselben ROS-2-Control-Struktur.
+
+[1]: https://discourse.openrobotics.org/t/gazebo-classic-end-of-life-ros-2-jazzy/36239?utm_source=chatgpt.com "Gazebo Classic End-Of-Life & ROS 2 Jazzy"
+[2]: https://gazebosim.org/docs/latest/ros2_launch_gazebo/?utm_source=chatgpt.com "Launch Gazebo from ROS 2"
+
