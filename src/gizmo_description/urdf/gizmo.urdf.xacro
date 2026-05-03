@@ -1,68 +1,152 @@
 <?xml version="1.0"?>
 <robot name="gizmo" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-  <!-- Placeholder skeleton: a base + one revolute joint + a paddle.
-       Replace with the real Gizmo geometry as it firms up. -->
+  <!--
+    Iteration 1 Gizmo: a simple quadruped with two arms.
 
-  <!-- controllers_yaml is resolved by the launch file via xacro mappings -->
+    Joints exposed to ros2_control:
+      front_left_hip_joint, front_left_knee_joint
+      front_right_hip_joint, front_right_knee_joint
+      rear_left_hip_joint,  rear_left_knee_joint
+      rear_right_hip_joint, rear_right_knee_joint
+      left_arm_joint, right_arm_joint
+
+    Geometry is deliberately box/cylinder/sphere only - this is here
+    to validate URDF, controllers and gait scaffolding, not to look
+    pretty. Real meshes come in a later iteration.
+  -->
+
   <xacro:arg name="controllers_yaml" default="/tmp/gizmo_controllers.yaml"/>
 
-  <xacro:property name="base_size" value="0.6 0.6 0.2"/>
+  <xacro:include filename="$(find gizmo_description)/urdf/materials.xacro"/>
+  <xacro:include filename="$(find gizmo_description)/urdf/leg_macro.xacro"/>
 
-  <link name="base_link">
+  <!-- Body geometry. -->
+  <xacro:property name="body_x" value="0.20"/>
+  <xacro:property name="body_y" value="0.15"/>
+  <xacro:property name="body_z" value="0.10"/>
+
+  <!-- Leg attachment offsets (relative to body_link). -->
+  <xacro:property name="hip_x" value="0.085"/>
+  <xacro:property name="hip_y" value="0.080"/>
+  <xacro:property name="hip_z" value="-0.04"/>
+
+  <!-- Root link: empty so Gazebo treats it as a free-floating base. -->
+  <link name="base_link"/>
+
+  <link name="body_link">
     <inertial>
-      <mass value="5.0"/>
+      <mass value="1.2"/>
       <origin xyz="0 0 0"/>
-      <inertia ixx="0.2" iyy="0.2" izz="0.2" ixy="0" ixz="0" iyz="0"/>
+      <inertia ixx="0.004" iyy="0.006" izz="0.008" ixy="0" ixz="0" iyz="0"/>
     </inertial>
     <visual>
-      <geometry><box size="${base_size}"/></geometry>
-      <material name="grey"><color rgba="0.5 0.5 0.5 1"/></material>
+      <geometry><box size="${body_x} ${body_y} ${body_z}"/></geometry>
+      <material name="gizmo_body"/>
     </visual>
     <collision>
-      <geometry><box size="${base_size}"/></geometry>
+      <geometry><box size="${body_x} ${body_y} ${body_z}"/></geometry>
     </collision>
   </link>
 
-  <link name="paddle_link">
-    <inertial>
-      <mass value="0.5"/>
-      <origin xyz="0 0 0.3"/>
-      <inertia ixx="0.02" iyy="0.02" izz="0.005" ixy="0" ixz="0" iyz="0"/>
-    </inertial>
-    <visual>
-      <origin xyz="0 0 0.3"/>
-      <geometry><box size="0.08 0.2 0.6"/></geometry>
-      <material name="orange"><color rgba="1.0 0.5 0.0 1"/></material>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0.3"/>
-      <geometry><box size="0.08 0.2 0.6"/></geometry>
-    </collision>
-  </link>
-
-  <joint name="paddle_joint" type="revolute">
+  <joint name="base_to_body" type="fixed">
     <parent link="base_link"/>
-    <child link="paddle_link"/>
-    <origin xyz="0 0 0.1" rpy="0 0 0"/>
-    <axis xyz="0 1 0"/>
-    <limit lower="-1.57" upper="1.57" effort="20.0" velocity="2.0"/>
+    <child link="body_link"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- ros2_control hookup for Gazebo Harmonic via gz_ros2_control -->
-  <ros2_control name="GizmoSystem" type="system">
-    <hardware>
-      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
-    </hardware>
-    <joint name="paddle_joint">
+  <!-- Head: fixed for now, gets a joint in a later iteration. -->
+  <link name="head_link">
+    <inertial>
+      <mass value="0.15"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="2e-4" iyy="2e-4" izz="2e-4" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <geometry><box size="0.07 0.09 0.07"/></geometry>
+      <material name="gizmo_head"/>
+    </visual>
+    <collision>
+      <geometry><box size="0.07 0.09 0.07"/></geometry>
+    </collision>
+  </link>
+
+  <joint name="head_fixed" type="fixed">
+    <parent link="body_link"/>
+    <child link="head_link"/>
+    <origin xyz="${body_x/2 - 0.02} 0 ${body_z/2 + 0.035}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Four legs. -->
+  <xacro:gizmo_leg prefix="front_left"  parent="body_link"
+                   x="${ hip_x}" y="${ hip_y}" z="${hip_z}"/>
+  <xacro:gizmo_leg prefix="front_right" parent="body_link"
+                   x="${ hip_x}" y="${-hip_y}" z="${hip_z}"/>
+  <xacro:gizmo_leg prefix="rear_left"   parent="body_link"
+                   x="${-hip_x}" y="${ hip_y}" z="${hip_z}"/>
+  <xacro:gizmo_leg prefix="rear_right"  parent="body_link"
+                   x="${-hip_x}" y="${-hip_y}" z="${hip_z}"/>
+
+  <!-- Arms: one revolute joint each, swings forward/back around Y. -->
+  <xacro:macro name="gizmo_arm" params="prefix y_sign">
+    <link name="${prefix}_arm_link">
+      <inertial>
+        <mass value="0.08"/>
+        <origin xyz="0 0 -0.04"/>
+        <inertia ixx="2e-4" iyy="2e-4" izz="3e-5" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 -0.04"/>
+        <geometry><box size="0.025 0.025 0.08"/></geometry>
+        <material name="gizmo_arm"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 -0.04"/>
+        <geometry><box size="0.025 0.025 0.08"/></geometry>
+      </collision>
+    </link>
+
+    <joint name="${prefix}_arm_joint" type="revolute">
+      <parent link="body_link"/>
+      <child link="${prefix}_arm_link"/>
+      <origin xyz="0 ${y_sign * (body_y/2 + 0.012)} ${body_z/2 - 0.015}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="-2.5" upper="2.5" effort="3.0" velocity="3.0"/>
+      <dynamics damping="0.05" friction="0.01"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:gizmo_arm prefix="left"  y_sign="1"/>
+  <xacro:gizmo_arm prefix="right" y_sign="-1"/>
+
+  <!-- ros2_control hookup for Gazebo Harmonic via gz_ros2_control. -->
+  <xacro:macro name="position_joint" params="name lower upper">
+    <joint name="${name}">
       <command_interface name="position">
-        <param name="min">-1.57</param>
-        <param name="max">1.57</param>
+        <param name="min">${lower}</param>
+        <param name="max">${upper}</param>
       </command_interface>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
       <state_interface name="effort"/>
     </joint>
+  </xacro:macro>
+
+  <ros2_control name="GizmoSystem" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+
+    <xacro:position_joint name="front_left_hip_joint"   lower="-1.2" upper="1.2"/>
+    <xacro:position_joint name="front_left_knee_joint"  lower="-2.2" upper="0.2"/>
+    <xacro:position_joint name="front_right_hip_joint"  lower="-1.2" upper="1.2"/>
+    <xacro:position_joint name="front_right_knee_joint" lower="-2.2" upper="0.2"/>
+    <xacro:position_joint name="rear_left_hip_joint"    lower="-1.2" upper="1.2"/>
+    <xacro:position_joint name="rear_left_knee_joint"   lower="-2.2" upper="0.2"/>
+    <xacro:position_joint name="rear_right_hip_joint"   lower="-1.2" upper="1.2"/>
+    <xacro:position_joint name="rear_right_knee_joint"  lower="-2.2" upper="0.2"/>
+    <xacro:position_joint name="left_arm_joint"         lower="-2.5" upper="2.5"/>
+    <xacro:position_joint name="right_arm_joint"        lower="-2.5" upper="2.5"/>
   </ros2_control>
 
   <gazebo>
