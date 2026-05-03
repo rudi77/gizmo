@@ -52,10 +52,13 @@ def generate_launch_description():
         launch_arguments={"gz_args": "-r -v 4 empty.sdf"}.items(),
     )
 
+    # Spawn height matches the symmetric stand pose in gizmo_gait_node:
+    # body_link sits at z = 0.17 m, which puts the foot spheres just on
+    # the ground when hips=0 and knees=-0.6 rad.
     spawn = Node(
         package="ros_gz_sim",
         executable="create",
-        arguments=["-topic", "robot_description", "-name", "gizmo", "-z", "0.1"],
+        arguments=["-topic", "robot_description", "-name", "gizmo", "-z", "0.17"],
         output="screen",
     )
 
