@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<robot name="gizmo" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Placeholder skeleton: a base + one revolute joint + a paddle.
+       Replace with the real Gizmo geometry as it firms up. -->
+
+  <!-- controllers_yaml is resolved by the launch file via xacro mappings -->
+  <xacro:arg name="controllers_yaml" default="/tmp/gizmo_controllers.yaml"/>
+
+  <xacro:property name="base_size" value="0.6 0.6 0.2"/>
+
+  <link name="base_link">
+    <inertial>
+      <mass value="5.0"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="0.2" iyy="0.2" izz="0.2" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <geometry><box size="${base_size}"/></geometry>
+      <material name="grey"><color rgba="0.5 0.5 0.5 1"/></material>
+    </visual>
+    <collision>
+      <geometry><box size="${base_size}"/></geometry>
+    </collision>
+  </link>
+
+  <link name="paddle_link">
+    <inertial>
+      <mass value="0.5"/>
+      <origin xyz="0 0 0.3"/>
+      <inertia ixx="0.02" iyy="0.02" izz="0.005" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.3"/>
+      <geometry><box size="0.08 0.2 0.6"/></geometry>
+      <material name="orange"><color rgba="1.0 0.5 0.0 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.3"/>
+      <geometry><box size="0.08 0.2 0.6"/></geometry>
+    </collision>
+  </link>
+
+  <joint name="paddle_joint" type="revolute">
+    <parent link="base_link"/>
+    <child link="paddle_link"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.57" upper="1.57" effort="20.0" velocity="2.0"/>
+  </joint>
+
+  <!-- ros2_control hookup for Gazebo Harmonic via gz_ros2_control -->
+  <ros2_control name="GizmoSystem" type="system">
+    <hardware>
+      <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+    </hardware>
+    <joint name="paddle_joint">
+      <command_interface name="position">
+        <param name="min">-1.57</param>
+        <param name="max">1.57</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+      <state_interface name="effort"/>
+    </joint>
+  </ros2_control>
+
+  <gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(arg controllers_yaml)</parameters>
+    </plugin>
+  </gazebo>
+
+</robot>
