@@ -2,7 +2,8 @@
 <robot name="gizmo" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
   <!--
-    Iteration 1 Gizmo: a simple quadruped with two arms.
+    Gizmo: simple quadruped with two arms, a panning head and a
+    colour-controlled face panel.
 
     Joints exposed to ros2_control:
       front_left_hip_joint, front_left_knee_joint
@@ -10,6 +11,10 @@
       rear_left_hip_joint,  rear_left_knee_joint
       rear_right_hip_joint, rear_right_knee_joint
       left_arm_joint, right_arm_joint
+      head_pan_joint
+
+    The display_link visual on the head is retinted at runtime by the
+    Gazebo MaterialColor system listening on /gizmo/face_color.
 
     Geometry is deliberately box/cylinder/sphere only - this is here
     to validate URDF, controllers and gait scaffolding, not to look
@@ -55,7 +60,12 @@
     <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- Head: fixed for now, gets a joint in a later iteration. -->
+  <!-- Head: pans around Z so Gizmo can look left/right.
+       Geometry stays a simple box; real CAD lands later. -->
+  <xacro:property name="head_x" value="0.07"/>
+  <xacro:property name="head_y" value="0.09"/>
+  <xacro:property name="head_z" value="0.07"/>
+
   <link name="head_link">
     <inertial>
       <mass value="0.15"/>
@@ -63,19 +73,59 @@
       <inertia ixx="2e-4" iyy="2e-4" izz="2e-4" ixy="0" ixz="0" iyz="0"/>
     </inertial>
     <visual>
-      <geometry><box size="0.07 0.09 0.07"/></geometry>
+      <geometry><box size="${head_x} ${head_y} ${head_z}"/></geometry>
       <material name="gizmo_head"/>
     </visual>
     <collision>
-      <geometry><box size="0.07 0.09 0.07"/></geometry>
+      <geometry><box size="${head_x} ${head_y} ${head_z}"/></geometry>
     </collision>
   </link>
 
-  <joint name="head_fixed" type="fixed">
+  <joint name="head_pan_joint" type="revolute">
     <parent link="body_link"/>
     <child link="head_link"/>
     <origin xyz="${body_x/2 - 0.02} 0 ${body_z/2 + 0.035}" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-1.5" upper="1.5" effort="2.0" velocity="2.0"/>
+    <dynamics damping="0.05" friction="0.01"/>
   </joint>
+
+  <!-- Display panel sitting on the front face of the head. The visual
+       is named so the Gazebo MaterialColor system below can retint it
+       in response to /gizmo/face_color messages. No collision: this is
+       a cosmetic surface, and a thin collision causes contact noise. -->
+  <link name="display_link">
+    <inertial>
+      <mass value="0.01"/>
+      <origin xyz="0 0 0"/>
+      <inertia ixx="1e-6" iyy="1e-6" izz="1e-6" ixy="0" ixz="0" iyz="0"/>
+    </inertial>
+    <visual name="display_visual">
+      <geometry><box size="0.005 0.06 0.045"/></geometry>
+      <material name="gizmo_face"/>
+    </visual>
+  </link>
+
+  <joint name="display_fixed" type="fixed">
+    <parent link="head_link"/>
+    <child link="display_link"/>
+    <origin xyz="${head_x/2 + 0.0026} 0 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Gazebo Harmonic MaterialColor system: retint display_link's
+       visual whenever a gz.msgs.Color message arrives on the topic.
+       The face node publishes std_msgs/ColorRGBA which is bridged to
+       gz.msgs.Color by ros_gz_bridge in the launch file. -->
+  <gazebo reference="display_link">
+    <plugin filename="gz-sim-material-color-system"
+            name="gz::sim::systems::MaterialColor">
+      <topic>/gizmo/face_color</topic>
+      <ambient>0.7 0.7 0.75 1</ambient>
+      <diffuse>0.7 0.7 0.75 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <emissive>0.4 0.4 0.45 1</emissive>
+    </plugin>
+  </gazebo>
 
   <!-- Four legs. -->
   <xacro:gizmo_leg prefix="front_left"  parent="body_link"
@@ -147,6 +197,7 @@
     <xacro:position_joint name="rear_right_knee_joint"  lower="-2.2" upper="0.2"/>
     <xacro:position_joint name="left_arm_joint"         lower="-2.5" upper="2.5"/>
     <xacro:position_joint name="right_arm_joint"        lower="-2.5" upper="2.5"/>
+    <xacro:position_joint name="head_pan_joint"         lower="-1.5" upper="1.5"/>
   </ros2_control>
 
   <gazebo>

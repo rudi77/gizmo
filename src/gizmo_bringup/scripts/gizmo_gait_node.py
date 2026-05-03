@@ -6,7 +6,16 @@ Pick the action with the `action` ROS parameter:
 
     ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=stand_pose
     ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=wave
+    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=wave_left
+    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=wave_right
+    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=arms_up
+    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=arms_down
     ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=crawl_forward
+
+To wave while crawling, combine actions:
+
+    ros2 run gizmo_bringup gizmo_gait_node --ros-args \
+        -p action:=crawl_forward -p crawl_arm_action:=wave_right
 
 The crawl is a static walk - one leg lifts at a time while the other
 three keep the body supported. Step length, step frequency, swing height,
@@ -34,6 +43,7 @@ JOINT_ORDER = [
     "rear_right_knee_joint",
     "left_arm_joint",
     "right_arm_joint",
+    "head_pan_joint",
 ]
 
 LEG_PREFIXES = ("front_left", "front_right", "rear_left", "rear_right")
@@ -45,6 +55,16 @@ LEG_PREFIXES = ("front_left", "front_right", "rear_left", "rear_right")
 STAND_HIP = 0.0
 STAND_KNEE = -0.6
 
+# Arms hang straight down at angle 0; -pi/2 lifts them forward/up so the
+# robot can wave or signal.
+ARM_DOWN = 0.0
+ARM_UP = -math.pi / 2
+
+# Wave centre and amplitude so wave actions stay clear of the joint limit
+# (-2.5 .. 2.5 rad) and don't snap when transitioning between poses.
+WAVE_CENTRE = ARM_UP
+WAVE_AMPLITUDE = 0.5
+
 STAND = {
     "front_left_hip_joint":   STAND_HIP,
     "front_left_knee_joint":  STAND_KNEE,
@@ -54,8 +74,9 @@ STAND = {
     "rear_left_knee_joint":   STAND_KNEE,
     "rear_right_hip_joint":   STAND_HIP,
     "rear_right_knee_joint":  STAND_KNEE,
-    "left_arm_joint":         0.0,
-    "right_arm_joint":        0.0,
+    "left_arm_joint":         ARM_DOWN,
+    "right_arm_joint":        ARM_DOWN,
+    "head_pan_joint":         0.0,
 }
 
 # Phase offsets for a static crawl. With duty = 0.75 each leg swings for
@@ -67,6 +88,10 @@ LEG_PHASE = {
     "front_right": 0.50,
     "rear_left":   0.75,
 }
+
+# Recognised values for `crawl_arm_action`. Anything else is treated as
+# "no parallel arm motion" (arms stay in stand pose during crawl).
+CRAWL_ARM_ACTIONS = ("none", "wave_left", "wave_right", "arms_up", "arms_down")
 
 
 def pose_to_positions(pose: dict[str, float]) -> list[float]:
@@ -111,6 +136,31 @@ def crawl_pose_at(
     return pose
 
 
+def apply_arm_motion(
+    pose: dict[str, float],
+    action: str,
+    t: float,
+    *,
+    wave_frequency: float,
+) -> None:
+    """Overwrite the arm joints in `pose` for a parallel arm motion."""
+    if action == "arms_up":
+        pose["left_arm_joint"] = ARM_UP
+        pose["right_arm_joint"] = ARM_UP
+    elif action == "arms_down":
+        pose["left_arm_joint"] = ARM_DOWN
+        pose["right_arm_joint"] = ARM_DOWN
+    elif action == "wave_left":
+        pose["left_arm_joint"] = WAVE_CENTRE + WAVE_AMPLITUDE * math.sin(
+            2.0 * math.pi * wave_frequency * t
+        )
+    elif action == "wave_right":
+        pose["right_arm_joint"] = WAVE_CENTRE + WAVE_AMPLITUDE * math.sin(
+            2.0 * math.pi * wave_frequency * t
+        )
+    # "none" or anything else: leave arms at stand pose.
+
+
 class GizmoGaitNode(Node):
     def __init__(self) -> None:
         super().__init__("gizmo_gait_node")
@@ -132,6 +182,17 @@ class GizmoGaitNode(Node):
         self.declare_parameter("crawl_settle_time", 1.5)      # s into stand
         self.declare_parameter("crawl_recover_time", 1.5)     # s back to stand
 
+        # Iteration 3: optional arm motion that runs in parallel to the
+        # crawl. "none" leaves the arms in the stand pose.
+        self.declare_parameter("crawl_arm_action", "none")
+        self.declare_parameter("crawl_arm_wave_frequency", 1.5)  # Hz
+
+        # Iteration 3: stand-alone arm-action timing.
+        self.declare_parameter("arm_settle_time", 1.5)  # s into stand
+        self.declare_parameter("arm_hold_time", 4.0)    # s for static poses
+        self.declare_parameter("arm_wave_cycles", 4)    # full sin cycles
+        self.declare_parameter("arm_wave_frequency", 1.5)  # Hz
+
         topic = self.get_parameter("topic").get_parameter_value().string_value
         self.pub = self.create_publisher(JointTrajectory, topic, 10)
 
@@ -143,17 +204,29 @@ class GizmoGaitNode(Node):
     def _f(self, name: str) -> float:
         return float(self.get_parameter(name).value)
 
+    def _i(self, name: str) -> int:
+        return int(self.get_parameter(name).value)
+
+    def _s(self, name: str) -> str:
+        return self.get_parameter(name).get_parameter_value().string_value
+
     def _kick_off(self) -> None:
         if self._fired:
             return
         self._fired = True
-        action = self.get_parameter("action").get_parameter_value().string_value
+        action = self._s("action")
         self.get_logger().info(f"running action: {action}")
 
         if action == "stand_pose":
             self._publish_stand()
-        elif action == "wave":
-            self._publish_wave()
+        elif action == "wave" or action == "wave_right":
+            self._publish_wave(side="right")
+        elif action == "wave_left":
+            self._publish_wave(side="left")
+        elif action == "arms_up":
+            self._publish_arm_pose(left=ARM_UP, right=ARM_UP)
+        elif action == "arms_down":
+            self._publish_arm_pose(left=ARM_DOWN, right=ARM_DOWN)
         elif action == "crawl_forward":
             self._publish_crawl()
         else:
@@ -168,26 +241,92 @@ class GizmoGaitNode(Node):
         msg.points = [make_point(pose_to_positions(STAND), 2.0)]
         self.pub.publish(msg)
 
-    def _publish_wave(self) -> None:
+    def _publish_arm_pose(self, *, left: float, right: float) -> None:
+        """Move both arms to fixed angles via the stand pose.
+
+        Always going through the stand pose keeps the path smooth even if
+        the previous action left the arms somewhere unusual, because the
+        controller only has to interpolate two short arcs instead of one
+        big jump straight to the target.
+        """
+        settle = self._f("arm_settle_time")
+        hold = self._f("arm_hold_time")
+
+        target = dict(STAND)
+        target["left_arm_joint"] = left
+        target["right_arm_joint"] = right
+
+        msg = JointTrajectory()
+        msg.joint_names = JOINT_ORDER
+        msg.points = [
+            make_point(pose_to_positions(STAND),  settle),
+            make_point(pose_to_positions(target), settle + hold * 0.4),
+            make_point(pose_to_positions(target), settle + hold),
+        ]
+        self.pub.publish(msg)
+
+    def _publish_wave(self, *, side: str) -> None:
+        """Side-aware wave that always returns through the stand pose.
+
+        The arm first ramps to WAVE_CENTRE (-pi/2), oscillates for
+        `arm_wave_cycles` periods at `arm_wave_frequency`, and then ramps
+        back to ARM_DOWN. Sampling the sin wave at `crawl_dt` keeps the
+        controller from seeing big jumps near the limits.
+        """
+        if side not in ("left", "right"):
+            self.get_logger().warn(
+                f"unknown wave side '{side}', defaulting to right"
+            )
+            side = "right"
+        joint = "left_arm_joint" if side == "left" else "right_arm_joint"
+
+        settle = self._f("arm_settle_time")
+        cycles = max(1, self._i("arm_wave_cycles"))
+        freq = self._f("arm_wave_frequency")
+        if freq <= 0.0:
+            self.get_logger().warn(
+                f"arm_wave_frequency={freq} must be > 0, clamping to 1.5 Hz"
+            )
+            freq = 1.5
+        wave_duration = cycles / freq
+        ramp_in = 0.7  # s to lift the arm to WAVE_CENTRE
+        ramp_out = 0.7  # s to drop the arm back to ARM_DOWN
+        sample_dt = self._f("crawl_dt")
+
         msg = JointTrajectory()
         msg.joint_names = JOINT_ORDER
 
         stand_pos = pose_to_positions(STAND)
+        msg.points = [make_point(stand_pos, settle)]
 
-        def with_right_arm(angle: float) -> list[float]:
-            p = list(stand_pos)
-            p[JOINT_ORDER.index("right_arm_joint")] = angle
-            return p
+        # 1. Lift arm to WAVE_CENTRE without disturbing the rest.
+        lifted = dict(STAND)
+        lifted[joint] = WAVE_CENTRE
+        t_lift_end = settle + ramp_in
+        msg.points.append(make_point(pose_to_positions(lifted), t_lift_end))
 
-        msg.points = [
-            make_point(stand_pos,                          2.0),
-            make_point(with_right_arm(-math.pi / 2),       3.5),
-            make_point(with_right_arm(-math.pi / 2 + 0.5), 4.5),
-            make_point(with_right_arm(-math.pi / 2 - 0.5), 5.5),
-            make_point(with_right_arm(-math.pi / 2 + 0.5), 6.5),
-            make_point(with_right_arm(-math.pi / 2 - 0.5), 7.5),
-            make_point(stand_pos,                          9.0),
-        ]
+        # 2. Sin oscillation around WAVE_CENTRE.
+        steps = max(1, int(round(wave_duration / sample_dt)))
+        for i in range(1, steps + 1):
+            t = i * sample_dt
+            angle = WAVE_CENTRE + WAVE_AMPLITUDE * math.sin(
+                2.0 * math.pi * freq * t
+            )
+            pose = dict(STAND)
+            pose[joint] = angle
+            msg.points.append(
+                make_point(pose_to_positions(pose), t_lift_end + t)
+            )
+
+        # 3. Ramp back to stand.
+        msg.points.append(
+            make_point(stand_pos, t_lift_end + wave_duration + ramp_out)
+        )
+
+        self.get_logger().info(
+            "wave_%s: cycles=%d freq=%.2f Hz waypoints=%d"
+            % (side, cycles, freq, len(msg.points))
+        )
         self.pub.publish(msg)
 
     def _publish_crawl(self) -> None:
@@ -199,12 +338,21 @@ class GizmoGaitNode(Node):
         dt = self._f("crawl_dt")
         settle = self._f("crawl_settle_time")
         recover = self._f("crawl_recover_time")
+        arm_action = self._s("crawl_arm_action").strip().lower()
+        arm_wave_freq = self._f("crawl_arm_wave_frequency")
 
         if not 0.0 < duty < 1.0:
             self.get_logger().warn(
                 f"crawl_duty_factor={duty} out of (0,1), clamping to 0.75"
             )
             duty = 0.75
+
+        if arm_action and arm_action not in CRAWL_ARM_ACTIONS:
+            self.get_logger().warn(
+                f"unknown crawl_arm_action '{arm_action}', "
+                f"falling back to 'none'"
+            )
+            arm_action = "none"
 
         msg = JointTrajectory()
         msg.joint_names = JOINT_ORDER
@@ -213,7 +361,9 @@ class GizmoGaitNode(Node):
         msg.points = [make_point(pose_to_positions(STAND), settle)]
 
         # 2. Bake the gait cycle as dense waypoints. The controller
-        #    interpolates between them, giving a smooth motion.
+        #    interpolates between them, giving a smooth motion. Arm
+        #    motion (if requested) is layered on top of the same pose
+        #    so it cannot fight the leg trajectory.
         steps = max(1, int(round(duration / dt)))
         for i in range(1, steps + 1):
             t = i * dt
@@ -223,6 +373,12 @@ class GizmoGaitNode(Node):
                 step_length=step_len,
                 swing_height=swing_h,
                 duty=duty,
+            )
+            apply_arm_motion(
+                pose,
+                arm_action,
+                t,
+                wave_frequency=arm_wave_freq,
             )
             msg.points.append(
                 make_point(pose_to_positions(pose), settle + t)
@@ -236,8 +392,9 @@ class GizmoGaitNode(Node):
 
         self.get_logger().info(
             "crawl: freq=%.2f Hz step=%.2f rad swing=%.2f rad "
-            "duty=%.2f duration=%.1f s waypoints=%d"
-            % (freq, step_len, swing_h, duty, duration, len(msg.points))
+            "duty=%.2f duration=%.1f s arm=%s waypoints=%d"
+            % (freq, step_len, swing_h, duty, duration,
+               arm_action or "none", len(msg.points))
         )
         self.pub.publish(msg)
 

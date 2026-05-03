@@ -11,4 +11,9 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
   RENAME gizmo_gait_node)
 
+install(PROGRAMS
+  scripts/gizmo_face_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME gizmo_face_node)
+
 ament_package()

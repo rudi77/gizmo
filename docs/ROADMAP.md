@@ -66,13 +66,21 @@ Krabbelbewegung. Vorwärts­fortschritt darf noch wackelig sein.
 
 ## Iteration 3 — Arme & Winken polieren
 
+**Status:** implementiert auf Branch
+`claude/implement-iterations-3-4-5uKrI`,
+Sim-Verifikation der Done-Kriterien steht noch aus.
+
 **Ziel:** Arme werden zu einem eigenständigen Mini-Feature.
 
 **Inhalt**
-- Aktionen `wave_left`, `wave_right`, `arms_up`, `arms_down`.
-- Sauberer Übergang zwischen Pose und Bewegung
-  (kein Sprung an den Joint-Limits).
-- Optional: Arm-Bewegung kann *parallel* zum Crawl laufen.
+- `gizmo_gait_node.py` um Aktionen `wave_left`, `wave_right`,
+  `arms_up`, `arms_down` erweitert (zusätzlich zum Alias `wave`).
+- Jede Arm-Aktion durchläuft die Stand-Pose als Zwischenschritt
+  und sample-t die Wave-Sinuskurve fein (`crawl_dt`), damit es
+  keinen Sprung an den Joint-Limits gibt.
+- Neuer Parameter `crawl_arm_action` (`none`, `wave_left`,
+  `wave_right`, `arms_up`, `arms_down`) lagert ein Arm-Verhalten
+  parallel auf den Crawl drauf, ohne die Bein-Trajektorie zu stören.
 
 **Done-Kriterium**
 - Alle Arm-Aktionen über Parameter `action` aufrufbar.
@@ -82,15 +90,29 @@ Krabbelbewegung. Vorwärts­fortschritt darf noch wackelig sein.
 
 ## Iteration 4 — Kopf, Display-Dummy, Gesichtsausdrücke
 
+**Status:** implementiert auf Branch
+`claude/implement-iterations-3-4-5uKrI`,
+Sim-Verifikation der Done-Kriterien steht noch aus.
+
 **Ziel:** Gizmo bekommt ein Gesicht.
 
 **Inhalt**
-- Optional: Kopf-Joint (Pan oder Tilt).
-- Display-Link am Kopf als farbiges Quad in Gazebo.
-- Neuer Node `gizmo_face_node` abonniert `/gizmo/face` (z. B.
-  `happy`, `sad`, `neutral`, `surprised`) und ändert Material/Textur.
+- Neues `head_pan_joint` (revolute um Z, Limit ±1.5 rad) ersetzt das
+  alte fixe Head-Joint und ist als 11. Joint im JTC eingehängt.
+- `display_link` als flaches Panel an der Vorderseite des Kopfes;
+  das Visual heißt `display_visual`, damit es vom Gazebo-Plugin
+  adressierbar ist.
+- `gz-sim-material-color-system` Plugin auf `display_link` lauscht
+  auf `/gizmo/face_color` (gz.msgs.Color) und färbt das Panel um.
+- `ros_gz_bridge` brückt `std_msgs/ColorRGBA` ↔ `gz.msgs.Color`
+  auf demselben Topic.
+- Neuer Node `gizmo_face_node` abonniert `/gizmo/face`
+  (`std_msgs/String`) und mappt `neutral`, `happy`, `sad`,
+  `surprised`, `angry` auf `ColorRGBA`-Werte. Beim Start wird
+  einmalig die Default-Expression veröffentlicht, damit Gizmo
+  schon vor dem ersten Brain-Befehl ein Gesicht trägt.
 - Auf Hardware später ersetzt durch echtes Display-Bild,
-  Topic-Schnittstelle bleibt gleich.
+  Topic-Schnittstelle (`/gizmo/face`) bleibt gleich.
 
 **Done-Kriterium**
 - `ros2 topic pub /gizmo/face std_msgs/String "data: 'happy'"`
