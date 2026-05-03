@@ -37,16 +37,25 @@ Leitprinzip: **Sim-first.** Erst in Gazebo, dann auf Hardware.
 
 ## Iteration 2 — Crawl-Gait
 
+**Status:** implementiert auf Branch `claude/roadmap-next-iteration-DIqZT`,
+Sim-Verifikation der Done-Kriterien steht noch aus.
+
 **Ziel:** Gizmo bewegt seine Beine rhythmisch in einer einfachen
 Krabbelbewegung. Vorwärts­fortschritt darf noch wackelig sein.
 
 **Inhalt**
-- `gizmo_gait_node.py` um Aktion `crawl_forward` erweitern.
-- Phasenversetzte Trajektorie über die 8 Bein-Joints
-  (z. B. Trab- oder einfache Diagonal-Sequenz).
-- Optional: parametrisierbare Schrittlänge und -frequenz.
-- Reibung/Damping in URDF prüfen, Spawn-Höhe so wählen, dass Füße
-  beim Stand fest am Boden stehen.
+- `gizmo_gait_node.py` um Aktion `crawl_forward` erweitert.
+- Statischer Krabbelgang mit Phasenversatz über die 8 Bein-Joints
+  (Phasen 0.00 / 0.25 / 0.50 / 0.75, duty 0.75 — drei Füße immer am Boden).
+- Parametrisierbar über ROS-Parameter: `crawl_frequency`,
+  `crawl_step_length`, `crawl_swing_height`, `crawl_duty_factor`,
+  `crawl_duration`.
+- Symmetrische Stand-Pose (alle Hüften 0, Knie −0.6 rad), damit alle
+  vier Füße auf gleicher Höhe sind. Spawn-Höhe in
+  `gizmo_sim.launch.py` auf z = 0.17 m angehoben, damit die Füße bei
+  Stand fest am Boden stehen.
+- Foot-Friction (`mu1=mu2=1.2`) und Joint-Damping (`0.05`) aus
+  Iteration 1 geprüft und für den Default-Crawl ausreichend befunden.
 
 **Done-Kriterium**
 - Mit `action:=crawl_forward` führt Gizmo mind. 5 Sekunden
