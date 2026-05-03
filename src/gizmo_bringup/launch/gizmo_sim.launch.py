@@ -76,11 +76,11 @@ def generate_launch_description():
         output="screen",
     )
 
-    paddle_spawner = Node(
+    jtc_spawner = Node(
         package="controller_manager",
         executable="spawner",
         arguments=[
-            "paddle_position_controller",
+            "gizmo_joint_trajectory_controller",
             "--controller-manager-timeout", "60",
         ],
         output="screen",
@@ -88,7 +88,7 @@ def generate_launch_description():
 
     delayed_spawn = TimerAction(period=4.0, actions=[spawn])
     delayed_jsb = TimerAction(period=8.0, actions=[jsb_spawner])
-    delayed_paddle = TimerAction(period=12.0, actions=[paddle_spawner])
+    delayed_jtc = TimerAction(period=12.0, actions=[jtc_spawner])
 
     return LaunchDescription([
         gz_sim,
@@ -96,5 +96,5 @@ def generate_launch_description():
         clock_bridge,
         delayed_spawn,
         delayed_jsb,
-        delayed_paddle,
+        delayed_jtc,
     ])

@@ -1,0 +1,134 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!--
+    Gizmo leg macro.
+
+    Each leg has two revolute joints rotating around Y (pitch):
+      ${prefix}_hip_joint   - swings the upper leg fore/aft
+      ${prefix}_knee_joint  - bends the lower leg
+
+    Geometry is intentionally simple (boxes + sphere foot) so the
+    kinematics and controller pipeline can be validated before any
+    real CAD lands.
+  -->
+  <xacro:macro name="gizmo_leg" params="prefix parent x y z">
+
+    <xacro:property name="upper_len" value="0.06"/>
+    <xacro:property name="lower_len" value="0.06"/>
+    <xacro:property name="leg_w"     value="0.022"/>
+    <xacro:property name="leg_d"     value="0.022"/>
+    <xacro:property name="hip_r"     value="0.018"/>
+    <xacro:property name="foot_r"    value="0.018"/>
+
+    <!-- Hip link: a small cylinder attached at the body corner. -->
+    <link name="${prefix}_hip_link">
+      <inertial>
+        <mass value="0.05"/>
+        <origin xyz="0 0 0"/>
+        <inertia ixx="1e-5" iyy="1e-5" izz="1e-5" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${hip_r}" length="0.025"/></geometry>
+        <material name="gizmo_leg"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry><cylinder radius="${hip_r}" length="0.025"/></geometry>
+      </collision>
+    </link>
+
+    <joint name="${prefix}_hip_fixed" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}_hip_link"/>
+      <origin xyz="${x} ${y} ${z}" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Upper leg: rotates around hip, drops down by upper_len. -->
+    <link name="${prefix}_upper_leg_link">
+      <inertial>
+        <mass value="0.08"/>
+        <origin xyz="0 0 ${-upper_len/2}"/>
+        <inertia ixx="2e-4" iyy="2e-4" izz="3e-5" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 ${-upper_len/2}"/>
+        <geometry><box size="${leg_w} ${leg_d} ${upper_len}"/></geometry>
+        <material name="gizmo_leg"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${-upper_len/2}"/>
+        <geometry><box size="${leg_w} ${leg_d} ${upper_len}"/></geometry>
+      </collision>
+    </link>
+
+    <joint name="${prefix}_hip_joint" type="revolute">
+      <parent link="${prefix}_hip_link"/>
+      <child link="${prefix}_upper_leg_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="-1.2" upper="1.2" effort="5.0" velocity="3.0"/>
+      <dynamics damping="0.05" friction="0.01"/>
+    </joint>
+
+    <!-- Lower leg: rotates at the knee, drops further down. -->
+    <link name="${prefix}_lower_leg_link">
+      <inertial>
+        <mass value="0.05"/>
+        <origin xyz="0 0 ${-lower_len/2}"/>
+        <inertia ixx="1.5e-4" iyy="1.5e-4" izz="2e-5" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 0 ${-lower_len/2}"/>
+        <geometry><box size="${leg_w} ${leg_d} ${lower_len}"/></geometry>
+        <material name="gizmo_leg"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${-lower_len/2}"/>
+        <geometry><box size="${leg_w} ${leg_d} ${lower_len}"/></geometry>
+      </collision>
+    </link>
+
+    <joint name="${prefix}_knee_joint" type="revolute">
+      <parent link="${prefix}_upper_leg_link"/>
+      <child link="${prefix}_lower_leg_link"/>
+      <origin xyz="0 0 ${-upper_len}" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+      <limit lower="-2.2" upper="0.2" effort="5.0" velocity="3.0"/>
+      <dynamics damping="0.05" friction="0.01"/>
+    </joint>
+
+    <!-- Foot: a small sphere for predictable ground contact. -->
+    <link name="${prefix}_foot_link">
+      <inertial>
+        <mass value="0.02"/>
+        <origin xyz="0 0 0"/>
+        <inertia ixx="1e-5" iyy="1e-5" izz="1e-5" ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+      <visual>
+        <geometry><sphere radius="${foot_r}"/></geometry>
+        <material name="gizmo_foot"/>
+      </visual>
+      <collision>
+        <geometry><sphere radius="${foot_r}"/></geometry>
+      </collision>
+    </link>
+
+    <joint name="${prefix}_foot_fixed" type="fixed">
+      <parent link="${prefix}_lower_leg_link"/>
+      <child link="${prefix}_foot_link"/>
+      <origin xyz="0 0 ${-lower_len}" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Foot friction so it doesn't skate on the ground plane. -->
+    <gazebo reference="${prefix}_foot_link">
+      <mu1>1.2</mu1>
+      <mu2>1.2</mu2>
+      <kp>1e6</kp>
+      <kd>10</kd>
+    </gazebo>
+
+  </xacro:macro>
+
+</robot>
