@@ -60,9 +60,42 @@ Gesamt ≈ 10–11 Servos. Dieselbe Topologie wird in der Sim verwendet.
 - TTS-Node spricht Antworten aus.
 
 ### 4.4 Brain / Action Router
-- Eingabe: User-Text, optional Kontext.
-- Ausgabe: JSON-Aktion an Bewegungs-, Mimik- oder Sprach-Knoten.
-- Schicht ist austauschbar (lokales LLM oder Cloud-API).
+- Eingabe: User-Text auf `/gizmo/user_text` (`std_msgs/String`),
+  optional Kontext.
+- Ausgabe: JSON-Aktion, intern auf eines von drei Topics geroutet:
+  - `/gizmo/movement` (`std_msgs/String`) — Bewegungsname (`crawl_forward`,
+    `wave`, `wave_left`, `wave_right`, `arms_up`, `arms_down`,
+    `stand_pose`).
+  - `/gizmo/face` (`std_msgs/String`) — Ausdruck (`neutral`, `happy`,
+    `sad`, `surprised`, `angry`).
+  - `/gizmo/say` (`std_msgs/String`) — Text für die TTS-Schicht.
+- Schicht ist austauschbar (lokales LLM oder Cloud-API): Backend wird
+  per ROS-Parameter `backend` (`rule_based` | `openai` | `anthropic`)
+  gewählt. Der Default `rule_based` macht keinen Netzwerkzugriff und
+  hält die Sim offline lauffähig.
+
+#### Action JSON Schema
+
+Das Brain liefert intern (und im Logging) eine Aktion in folgender
+Form, bevor sie auf eines der drei Topics zerlegt wird:
+
+```json
+{
+  "action": "move" | "face" | "say" | "noop",
+  "movement":   "<name>",
+  "expression": "<name>",
+  "text":       "<text>"
+}
+```
+
+- `action: "move"` benötigt `movement` aus der oben genannten Liste.
+- `action: "face"` benötigt `expression` aus der oben genannten Liste.
+- `action: "say"` benötigt `text` (nicht-leer).
+- `action: "noop"` lässt das Brain still — wird genutzt, wenn keine
+  Regel und kein LLM-Backend etwas Sinnvolles zurückgeben.
+
+Untere Schichten (Movement, Face, TTS) sehen nur ihren eigenen Topic-
+String, kennen das Schema nicht und müssen es daher nicht parsen.
 
 ## 5. Software-Architektur (Sollzustand)
 

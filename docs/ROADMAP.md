@@ -123,14 +123,27 @@ Sim-Verifikation der Done-Kriterien steht noch aus.
 
 ## Iteration 5 — LLM Action Router (Brain)
 
+**Status:** implementiert auf Branch
+`claude/implement-iteration-5-MErTR`,
+Sim-Verifikation der Done-Kriterien steht noch aus.
+
 **Ziel:** Gizmo versteht natürlichsprachliche Befehle.
 
 **Inhalt**
-- Neues Paket `gizmo_brain` mit Node, der Text auf
-  `/gizmo/user_text` abonniert.
-- LLM-Aufruf (lokal oder API) liefert strukturierte Aktion als JSON.
-- Aktion wird an Movement-, Face- oder TTS-Layer geroutet.
-- Klar definiertes JSON-Schema für Aktionen, dokumentiert im PRD.
+- Neues Paket `gizmo_brain` mit Node `gizmo_brain_node`, der
+  `/gizmo/user_text` (`std_msgs/String`) abonniert.
+- Backend per ROS-Parameter `backend` wählbar:
+  `rule_based` (Default, deterministisch, keine Netzwerk-Abhängigkeit),
+  `openai`, `anthropic`. Cloud-Backends sind als Stubs angelegt und
+  fallen ohne API-Key auf den Regel-Matcher zurück, damit die Sim auch
+  offline startet.
+- Aktion wird in JSON normalisiert und auf drei Topics zerlegt:
+  `/gizmo/movement` (Movement-Layer), `/gizmo/face` (Face-Layer) und
+  `/gizmo/say` (TTS-Platzhalter für Iteration 6). JSON-Schema ist im
+  PRD dokumentiert.
+- `gizmo_gait_node` lauscht zusätzlich zu seinem One-Shot-Modus
+  auf `/gizmo/movement` und führt benannte Aktionen aus. Im Launch
+  läuft es mit `action:=listen` als reiner Movement-Router.
 
 **Done-Kriterium**
 - Test-String "lauf nach vorne" auf `/gizmo/user_text`
