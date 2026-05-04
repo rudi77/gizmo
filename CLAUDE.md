@@ -70,7 +70,7 @@ Crawl gait, wave timing, and arm-pose timing are exposed as ROS parameters on `g
 
 ### One controller, 11 joints, one trajectory topic
 
-`gizmo_joint_trajectory_controller` (a `joint_trajectory_controller/JointTrajectoryController`) owns **all 11 joints** in a fixed order — see `JOINT_ORDER` in `src/gizmo_bringup/scripts/gizmo_gait_node.py:35`. Anything publishing trajectories must use that exact ordering. Adding a new joint means: add it to the URDF (`gizmo.urdf.xacro`), add a `<xacro:position_joint>` entry inside `<ros2_control>`, list it under `joints:` in `gizmo_controllers.yaml`, and append it to `JOINT_ORDER`. Forgetting any one of these will silently break gait/pose code.
+`gizmo_joint_trajectory_controller` (a `joint_trajectory_controller/JointTrajectoryController`) owns **all 11 joints** in a fixed order — see `JOINT_ORDER` in `src/gizmo_bringup/scripts/gizmo_gait_node.py:46`. Anything publishing trajectories must use that exact ordering. Adding a new joint means: add it to the URDF (`gizmo.urdf.xacro`), add a `<xacro:position_joint>` entry inside `<ros2_control>`, list it under `joints:` in `gizmo_controllers.yaml`, and append it to `JOINT_ORDER`. Forgetting any one of these will silently break gait/pose code.
 
 The stand pose is symmetric (hips=0, knees=−0.6 rad). Spawn z in the launch file (`0.17 m`) was picked so feet just touch the ground at this pose — if you change leg geometry in `leg_macro.xacro`, recompute and update the spawn z.
 
@@ -103,7 +103,7 @@ These are baked into `src/gizmo_bringup/launch/gizmo_sim.launch.py` and `src/giz
 
 ## Conventions
 
-- **CMakeLists install whitelist**: `gizmo_description/CMakeLists.txt` installs `urdf meshes config launch`; `meshes/` and `launch/` don't exist yet but are reserved for later iterations. If you add resources, put them in those directories rather than inventing new ones.
+- **CMakeLists install whitelist**: `gizmo_description/CMakeLists.txt` installs `urdf meshes config launch`; `meshes/` and `launch/` exist but are still empty (reserved for later iterations). If you add resources, put them in those directories rather than inventing new ones.
 - **Adding a new Python node** in `gizmo_bringup`: drop it under `scripts/`, add an `install(PROGRAMS … RENAME …)` block to `CMakeLists.txt` (note the rename strips the `.py`), and add the relevant `<exec_depend>` to `package.xml`.
 - **Iteration workflow**: each iteration in `docs/ROADMAP.md` corresponds to a feature branch and a PR. Don't merge before the documented done-criteria pass in sim. New features layer onto the existing topology — they don't replace the movement/face/brain/speech split.
 - **Shell scripts** (`scripts/01_install_gazebo_ros2_wsl2.sh`, `02_test_gazebo.sh`) use `set -eo pipefail` (no `-u`) on purpose: ROS setup scripts reference unbound vars and trip `nounset`.
