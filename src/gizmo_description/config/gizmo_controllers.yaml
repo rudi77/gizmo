@@ -21,6 +21,7 @@ gizmo_joint_trajectory_controller:
       - rear_right_knee_joint
       - left_arm_joint
       - right_arm_joint
+      - head_pan_joint
     command_interfaces:
       - position
     state_interfaces:

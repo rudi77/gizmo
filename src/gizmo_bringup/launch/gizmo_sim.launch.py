@@ -69,6 +69,26 @@ def generate_launch_description():
         output="screen",
     )
 
+    # Face colour bridge: ROS publishes std_msgs/ColorRGBA on
+    # /gizmo/face_color; ros_gz_bridge converts each message to a
+    # gz.msgs.Color which the MaterialColor plugin attached to
+    # display_link uses to retint the face panel.
+    face_color_bridge = Node(
+        package="ros_gz_bridge",
+        executable="parameter_bridge",
+        arguments=[
+            "/gizmo/face_color@std_msgs/msg/ColorRGBA]gz.msgs.Color",
+        ],
+        output="screen",
+    )
+
+    face_node = Node(
+        package="gizmo_bringup",
+        executable="gizmo_face_node",
+        output="screen",
+        parameters=[{"use_sim_time": True}],
+    )
+
     jsb_spawner = Node(
         package="controller_manager",
         executable="spawner",
@@ -97,6 +117,8 @@ def generate_launch_description():
         gz_sim,
         rsp,
         clock_bridge,
+        face_color_bridge,
+        face_node,
         delayed_spawn,
         delayed_jsb,
         delayed_jtc,

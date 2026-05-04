@@ -21,4 +21,11 @@
     <color rgba="0.55 0.35 0.10 1.0"/>
   </material>
 
+  <!-- Initial colour of the face display. The MaterialColor Gazebo
+       system retints this material at runtime when /gizmo/face_color
+       is published, so the value here is just the boot-time look. -->
+  <material name="gizmo_face">
+    <color rgba="0.7 0.7 0.75 1.0"/>
+  </material>
+
 </robot>
