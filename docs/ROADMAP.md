@@ -155,18 +155,40 @@ Sim-Verifikation der Done-Kriterien steht noch aus.
 
 ## Iteration 6 — STT/TTS
 
+**Status:** implementiert auf Branch
+`claude/iteration-6-code-review-KAp8w`,
+Sim-Verifikation der Done-Kriterien steht noch aus.
+
 **Ziel:** Gizmo hört zu und antwortet hörbar.
 
 **Inhalt**
-- `stt_node` nimmt Mikrofon-Audio auf, veröffentlicht Text auf
-  `/gizmo/user_text`.
-- `tts_node` abonniert `/gizmo/say` und gibt Audio aus.
-- Brain-Node nutzt beides für vollständigen Sprach-Loop.
+- Neuer Node `gizmo_stt_node` (Paket `gizmo_bringup`): Engine per
+  ROS-Parameter `engine` (`dummy` Default | `mic`). Im `mic`-Modus
+  läuft `speech_recognition.listen_in_background()` in einem eigenen
+  Thread und veröffentlicht erkannten Text auf `/gizmo/user_text`.
+  Fehlt die Library oder das Eingabegerät, fällt der Node still auf
+  `dummy` zurück, damit der Launch auch ohne Mic startet.
+- Neuer Node `gizmo_tts_node` (Paket `gizmo_bringup`): abonniert
+  `/gizmo/say` und ruft `espeak-ng` (oder `espeak`) per `subprocess.Popen`
+  auf — non-blocking, damit der Spin-Loop frei bleibt. Engine fällt
+  automatisch auf `dummy` (nur Log) zurück, wenn kein Binary auf dem
+  PATH ist.
+- Launch startet beide Nodes; STT bleibt im `dummy`-Modus, weil
+  Gazebo/WSL2 standardmäßig keinen Mic-Zugang hat. Wechsel auf echtes
+  Mikrofon per CLI: `ros2 run gizmo_bringup gizmo_stt_node --ros-args
+  -p engine:=mic`.
+- Brain bleibt unverändert: `/gizmo/say`-Aktionen aus dem
+  Rule-Matcher (Trigger-Phrasen `sag …`, `sage …`, `say …`, `tell …`)
+  schließen jetzt erstmals den vollständigen Loop
+  Mic → STT → Brain → TTS → Lautsprecher.
 
 **Done-Kriterium**
 - Sprachbefehl in Mikrofon → Gizmo führt passende Aktion aus
   und antwortet per TTS.
 - End-to-End-Latenz dokumentiert (Ziel: < 3 s in Sim).
+  Aufschlüsselung im Header von `gizmo_stt_node.py`:
+  Mic-VAD ≈ pause_threshold (0.8 s) + Recogniser ≈ 0.4–1.0 s +
+  Brain-Routing ≈ 10 ms + espeak-Start ≈ 50 ms.
 
 ---
 

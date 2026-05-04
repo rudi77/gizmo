@@ -16,4 +16,14 @@ install(PROGRAMS
   DESTINATION lib/${PROJECT_NAME}
   RENAME gizmo_face_node)
 
+install(PROGRAMS
+  scripts/gizmo_stt_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME gizmo_stt_node)
+
+install(PROGRAMS
+  scripts/gizmo_tts_node.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME gizmo_tts_node)
+
 ament_package()

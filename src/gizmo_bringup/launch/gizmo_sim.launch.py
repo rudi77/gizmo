@@ -114,6 +114,34 @@ def generate_launch_description():
         ],
     )
 
+    # Iteration 6: speech loop. STT defaults to dummy so the launch
+    # never depends on a microphone (Gazebo + WSL2 typically has none);
+    # set `engine:=mic` from the CLI once `SpeechRecognition` and a real
+    # input device are available. TTS defaults to espeak-ng and auto-
+    # falls back to dummy (log-only) if the binary is missing, so the
+    # launch stays green on systems without `apt install espeak-ng`.
+    stt_node = Node(
+        package="gizmo_bringup",
+        executable="gizmo_stt_node",
+        output="screen",
+        parameters=[
+            {"use_sim_time": True},
+            {"engine": "dummy"},
+            {"language": "de-DE"},
+        ],
+    )
+
+    tts_node = Node(
+        package="gizmo_bringup",
+        executable="gizmo_tts_node",
+        output="screen",
+        parameters=[
+            {"use_sim_time": True},
+            {"engine": "espeak"},
+            {"language": "de"},
+        ],
+    )
+
     jsb_spawner = Node(
         package="controller_manager",
         executable="spawner",
@@ -149,6 +177,8 @@ def generate_launch_description():
         clock_bridge,
         face_color_bridge,
         face_node,
+        tts_node,
+        stt_node,
         delayed_spawn,
         delayed_jsb,
         delayed_jtc,
