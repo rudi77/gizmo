@@ -2,15 +2,25 @@
 """Pose / gait driver for Gizmo.
 
 Publishes JointTrajectory goals to the gizmo_joint_trajectory_controller.
-Pick the action with the `action` ROS parameter:
+The node serves two roles:
 
-    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=stand_pose
-    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=wave
-    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=wave_left
-    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=wave_right
-    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=arms_up
-    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=arms_down
-    ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=crawl_forward
+1. One-shot test driver. Pick the action with the `action` ROS parameter
+   and the trajectory fires once shortly after launch:
+
+       ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=stand_pose
+       ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=wave
+       ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=wave_left
+       ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=wave_right
+       ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=arms_up
+       ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=arms_down
+       ros2 run gizmo_bringup gizmo_gait_node --ros-args -p action:=crawl_forward
+
+2. Movement router (Iteration 5). The node always subscribes to
+   /gizmo/movement (std_msgs/String); each message names one of the
+   actions above and runs it. The Brain layer publishes to that topic
+   so it can drive movement without knowing about JointTrajectory.
+   Set `action:=listen` to skip the one-shot kick-off and only react
+   to the topic - that is what the launch file does.
 
 To wave while crawling, combine actions:
 
@@ -29,6 +39,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from builtin_interfaces.msg import Duration
+from std_msgs.msg import String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 
 
@@ -193,8 +204,21 @@ class GizmoGaitNode(Node):
         self.declare_parameter("arm_wave_cycles", 4)    # full sin cycles
         self.declare_parameter("arm_wave_frequency", 1.5)  # Hz
 
+        # Iteration 5: brain → gait command channel. Always-on so a
+        # single long-running gait_node can serve both the one-shot
+        # test mode and the brain-driven router mode.
+        self.declare_parameter("movement_topic", "/gizmo/movement")
+
         topic = self.get_parameter("topic").get_parameter_value().string_value
         self.pub = self.create_publisher(JointTrajectory, topic, 10)
+
+        movement_topic = self._s("movement_topic")
+        self.movement_sub = self.create_subscription(
+            String, movement_topic, self._on_movement_cmd, 10
+        )
+        self.get_logger().info(
+            f"listening for movement commands on '{movement_topic}'"
+        )
 
         # Give the publisher a moment to discover the controller before
         # firing the first trajectory.
@@ -215,8 +239,24 @@ class GizmoGaitNode(Node):
             return
         self._fired = True
         action = self._s("action")
-        self.get_logger().info(f"running action: {action}")
+        if action == "listen":
+            # Router-only mode: the node stays alive purely to react to
+            # /gizmo/movement messages from the Brain layer.
+            self.get_logger().info(
+                "action=listen, waiting for /gizmo/movement commands"
+            )
+            return
+        self._run_action(action)
 
+    def _on_movement_cmd(self, msg: String) -> None:
+        action = (msg.data or "").strip()
+        if not action:
+            self.get_logger().warn("empty /gizmo/movement, ignoring")
+            return
+        self._run_action(action)
+
+    def _run_action(self, action: str) -> None:
+        self.get_logger().info(f"running action: {action}")
         if action == "stand_pose":
             self._publish_stand()
         elif action == "wave" or action == "wave_right":

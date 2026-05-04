@@ -89,6 +89,31 @@ def generate_launch_description():
         parameters=[{"use_sim_time": True}],
     )
 
+    # Iteration 5: long-running gait node in router mode. action=listen
+    # disables the one-shot kick-off; trajectories are now triggered by
+    # std_msgs/String messages on /gizmo/movement, which is what the
+    # brain node publishes.
+    gait_router = Node(
+        package="gizmo_bringup",
+        executable="gizmo_gait_node",
+        output="screen",
+        parameters=[{"use_sim_time": True}, {"action": "listen"}],
+    )
+
+    # Iteration 5: LLM action router. The launch file ships with the
+    # rule-based backend so the sim works with no API keys; switch to
+    # `openai` or `anthropic` via `ros2 run gizmo_brain gizmo_brain_node`
+    # with `-p backend:=...` once a key is available.
+    brain_node = Node(
+        package="gizmo_brain",
+        executable="gizmo_brain_node",
+        output="screen",
+        parameters=[
+            {"use_sim_time": True},
+            {"backend": "rule_based"},
+        ],
+    )
+
     jsb_spawner = Node(
         package="controller_manager",
         executable="spawner",
@@ -113,6 +138,11 @@ def generate_launch_description():
     delayed_jsb = TimerAction(period=8.0, actions=[jsb_spawner])
     delayed_jtc = TimerAction(period=12.0, actions=[jtc_spawner])
 
+    # Brain + gait_router come up after the controller spawners so the
+    # very first /gizmo/movement message has a live JTC to publish to.
+    delayed_gait = TimerAction(period=14.0, actions=[gait_router])
+    delayed_brain = TimerAction(period=15.0, actions=[brain_node])
+
     return LaunchDescription([
         gz_sim,
         rsp,
@@ -122,4 +152,6 @@ def generate_launch_description():
         delayed_spawn,
         delayed_jsb,
         delayed_jtc,
+        delayed_gait,
+        delayed_brain,
     ])
