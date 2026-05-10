@@ -128,19 +128,26 @@ def crawl_pose_at(
 ) -> dict[str, float]:
     """Joint positions for the crawl gait at simulation time `t` (s)."""
     pose = dict(STAND)
+    # Sign convention: the hip joint axis is +Y and the leg hangs along
+    # -Z, so a positive hip angle tilts the foot toward -X (backward in
+    # the body frame). To push the body forward, the stance leg must
+    # therefore *increase* its hip angle (foot sweeps from front to
+    # back in body frame while pinned to the ground by friction).
     for prefix, phi in LEG_PHASE.items():
         phase = (t * frequency + phi) % 1.0
         if phase < duty:
-            # Stance: hip rotates from +step/2 (forward) to -step/2 (back),
-            # pushing the body forward. Knee stays at the stand angle.
+            # Stance: hip rotates from -step/2 (foot forward in body
+            # frame) to +step/2 (foot back), pushing the body forward.
+            # Knee stays at the stand angle so the foot keeps contact.
             s = phase / duty
-            hip_offset = step_length / 2.0 - step_length * s
+            hip_offset = -step_length / 2.0 + step_length * s
             knee_offset = 0.0
         else:
-            # Swing: hip returns to the forward position while the knee
-            # bends to lift the foot. sin-shape gives a smooth lift/drop.
+            # Swing: hip returns the foot to the forward position while
+            # the knee bends to lift it. sin-shape gives a smooth
+            # lift/drop.
             s = (phase - duty) / (1.0 - duty)
-            hip_offset = -step_length / 2.0 + step_length * s
+            hip_offset = step_length / 2.0 - step_length * s
             knee_offset = -swing_height * math.sin(math.pi * s)
         pose[f"{prefix}_hip_joint"] = STAND_HIP + hip_offset
         pose[f"{prefix}_knee_joint"] = STAND_KNEE + knee_offset
